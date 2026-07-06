@@ -282,6 +282,13 @@ def sync_device(
 
 def get_netbox_ip_and_hostname(device: Devices, test=None) -> tuple[str, str]:
     """Extracts preferred IP and hostname from a NetBox device."""
+
+    # Todo: Incorrect for servers, where there is the primary IP, and an OOB IP.
+    # The primary IP should be used for the librenms device, and if there is an OOB IP
+    # then it should be added as the Device IPMI IP config along with
+    # additional IPMI configuration (ipmi username/password etc..).
+    # See for example: https://$librenmsurl/device/device=1032/tab=edit/section=ipmi
+
     target_ip = cast(
         IpAddresses, device.oob_ip if device.oob_ip else device.primary_ip4
     )
@@ -396,6 +403,21 @@ def attempt_find_orphans(
     return orphans_and_candidates
 
 
+def write_hosts_file(netbox_devices: dict[str, Devices], output_file: Path) -> None:
+    """Generates a hosts file for NetBox devices."""
+
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    with output_file.open("w") as f:
+        for device in netbox_devices.values():
+            ip, hostname = get_netbox_ip_and_hostname(device)
+            if ip != hostname:
+                f.write(f"{ip} {hostname}\n")
+        f.close()
+
+    logging.info(f"Hosts file generated at: {output_file}")
+
+
 def main() -> None:
     config_path = Path(__file__).resolve().parent / "config.toml"
     with config_path.open("rb") as f:
@@ -421,7 +443,7 @@ def main() -> None:
     libnms = LibreNMSClient(
         api_url=config["librenms"]["api"],
         token=config["librenms"]["token"],
-        verify=config["librenms"]["ca_verify"],
+        verify=config["general"]["ca_verify"],
         dry_run=config["general"]["dry_run"],
     )
     logging.info("[Step 1/6] Loading roles from Netbox")
@@ -433,7 +455,7 @@ def main() -> None:
     devices_init_count = len(devices_init)
     logging.info(f"Found {devices_init_count} matching devices")
 
-    logging.info("[Step 3/6] Filtering out Netbox devices without a primary/OOB IP")
+    logging.info("[Step 3/6] Filtering out Netbox devices without a primary or OOB IP")
     netbox_devices = filter_netbox_devices(devices_init)
     netbox_devices_count = len(netbox_devices)
     logging.info(
@@ -441,31 +463,42 @@ def main() -> None:
     )
 
     logging.info("[Step 4/6] Fetching map of Netbox/LibreNMS devices")
-    linked_libnms, unlinked_libnms = fetch_libnms_mapping(
-        client=libnms, netbox_devices=netbox_devices
-    )
-    initial_linked_count = len(linked_libnms)
-    initial_unlinked_count = len(unlinked_libnms)
-    logging.info(
-        f"Found {initial_linked_count} devices already linked to Netbox, and {initial_unlinked_count} not yet linked"
-    )
+    # linked_libnms, unlinked_libnms = fetch_libnms_mapping(
+    #     client=libnms, netbox_devices=netbox_devices
+    # )
+    # initial_linked_count = len(linked_libnms)
+    # initial_unlinked_count = len(unlinked_libnms)
+    # logging.info(
+    #     f"Found {initial_linked_count} devices already linked to Netbox, and {initial_unlinked_count} not yet linked"
+    # )
 
     logging.info("[Step 5/6] Checking Netbox devices against LibreNMS, and syncing")
-    sync_netbox_librenms(libnms, netbox_devices, linked_libnms, unlinked_libnms)
-    final_linked_count = len(linked_libnms)
-    final_unlinked_count = len(linked_libnms)
-    logging.info(
-        f"{initial_linked_count - final_linked_count} newly linked devices, "
-        f"consisting of {initial_unlinked_count - final_unlinked_count} previously unlinked devices that are now linked, "
-        f"and {final_linked_count + final_unlinked_count - initial_linked_count - initial_unlinked_count} newly-created devices."
-    )
+    # sync_netbox_librenms(libnms, netbox_devices, linked_libnms, unlinked_libnms)
+    # final_linked_count = len(linked_libnms)
+    # final_unlinked_count = len(linked_libnms)
+    # logging.info(
+    #     f"{initial_linked_count - final_linked_count} newly linked devices, "
+    #     f"consisting of {initial_unlinked_count - final_unlinked_count} previously unlinked devices that are now linked, "
+    #     f"and {final_linked_count + final_unlinked_count - initial_linked_count - initial_unlinked_count} newly-created devices."
+    # )
 
-    logging.info(
-        f"[Step 6/6] Checking {final_unlinked_count} remaining unlinked devices for potential orphans"
-    )
+    # logging.info(
+    #     f"[Step 6/6] Checking {final_unlinked_count} remaining unlinked devices for potential orphans"
+    # )
     # TODO: Do something with orphans remaining
     # For example, add to a LibreNMS device group for visibility
-    orphans_and_candidates = attempt_find_orphans(nb, unlinked_libnms)  # noqa: F841
+    # orphans_and_candidates = attempt_find_orphans(nb, unlinked_libnms)  # noqa: F841
+
+    if (
+        (config["genhosts"]["enabled"])
+        and (len(netbox_devices) > 0)
+        and (len(config["genhosts"]["output_file"]) > 0)
+    ):
+        logging.info(
+            f"[Step 7] Generating hosts file for {len(netbox_devices)} Netbox devices"
+        )
+
+        write_hosts_file(netbox_devices, Path(config["genhosts"]["output_file"]))
 
     logging.info("Script finished")
 
