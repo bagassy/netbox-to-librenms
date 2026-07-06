@@ -16,3 +16,8 @@ override_pull_ids = [1234, 567] # Netbox device IDs to pull ignoring role/tenant
 [general]
 log_file = "/path/to/logfile.log"
 dry_run = false # Dry Run mode for debug/logging
+
+# whether to generate a hosts file from the devices.
+[genhosts]
+enabled = true # True to generate a hosts file for netbox devices
+output_file = "/etc/dnsmasq.hosts.d/netbox_hosts" # output path for the generated hosts file
